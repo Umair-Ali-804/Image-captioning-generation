@@ -1,38 +1,25 @@
-import torch
-from torch import nn, optim
-from model import EncoderCNN, DecoderRNN
-from data_utils import get_loader
-from tokenizer import tokenizer, vocab_size  # Assume a tokenizer.py exists
 import os
+import matplotlib.pyplot as plt
+from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping, ReduceLROnPlateau
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def train_model(model, X_img_train, X_seq_train, y_train, X_img_val, X_seq_val, y_val, output_dir='weights'):
+    callbacks = [
+        ModelCheckpoint(os.path.join(output_dir, 'best_model.h5'), save_best_only=True),
+        ReduceLROnPlateau(patience=3),
+        EarlyStopping(patience=5, restore_best_weights=True)
+    ]
 
-def train_model():
-    dataloader = get_loader("data/train.csv", "data/images", tokenizer, batch_size=32)
-    encoder = EncoderCNN(embed_size=256).to(device)
-    decoder = DecoderRNN(256, 512, vocab_size).to(device)
+    history = model.fit(
+        [X_img_train, X_seq_train], y_train,
+        validation_data=([X_img_val, X_seq_val], y_val),
+        batch_size=32,
+        epochs=30,
+        callbacks=callbacks
+    )
 
-    criterion = nn.CrossEntropyLoss()
-    params = list(decoder.parameters()) + list(encoder.fc.parameters())
-    optimizer = optim.Adam(params, lr=1e-3)
-
-    for epoch in range(10):
-        for i, (images, captions) in enumerate(dataloader):
-            images, captions = images.to(device), captions.to(device)
-            features = encoder(images)
-            outputs = decoder(features, captions)
-            loss = criterion(outputs.reshape(-1, vocab_size), captions[:, 1:].reshape(-1))
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            if i % 10 == 0:
-                print(f"Epoch [{epoch}], Step [{i}], Loss: {loss.item():.4f}")
-
-    os.makedirs("weights", exist_ok=True)
-    torch.save(encoder.state_dict(), "weights/encoder.pth")
-    torch.save(decoder.state_dict(), "weights/decoder.pth")
-
-if __name__ == "__main__":
-    train_model()
+    # Save training plot
+    plt.plot(history.history['loss'], label='Train')
+    plt.plot(history.history['val_loss'], label='Validation')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+    plt.savefig('graphs/loss_plot.png')
